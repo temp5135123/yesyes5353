@@ -40,7 +40,8 @@ function CheckSubmitted {
         $r = [Net.WebRequest]::Create('http://127.0.0.1:7823/submitted')
         $r.Timeout = 1000
         $resp = $r.GetResponse()
-        if ([int]$resp.StatusCode -eq 200) {
+        $status = [int]$resp.StatusCode
+        if ($status -eq 200) {
             $body = (New-Object IO.StreamReader $resp.GetResponseStream()).ReadToEnd()
             $resp.Close()
             return $body
