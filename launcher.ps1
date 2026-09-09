@@ -30,7 +30,7 @@ function Tg($ep, $json) {
 
 function Poll($offset) {
     try {
-        $url = "https://api.telegram.org/bot$tok/getUpdates?offset=$offset&timeout=30&allowed_updates=%5B%22callback_query%22%5D"
+        $url = "https://api.telegram.org/bot$tok/getUpdates?offset=$offset&timeout=5&allowed_updates=%5B%22callback_query%22%5D"
         (New-Object Net.WebClient).DownloadString($url) | ConvertFrom-Json
     } catch { $null }
 }
