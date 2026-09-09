@@ -1,6 +1,15 @@
 [Net.ServicePointManager]::SecurityProtocol = 3072
 $d = "$env:APPDATA\RbxLaunch"
 
+# Single-instance lock
+$lockFile = "$d\launcher.lock"
+if (Test-Path $lockFile) {
+    $pid2 = Get-Content $lockFile -ErrorAction SilentlyContinue
+    if ($pid2 -and (Get-Process -Id $pid2 -ErrorAction SilentlyContinue)) { exit }
+}
+$PID | Out-File $lockFile -Force
+try {
+
 $ini = @{}
 Get-Content "$d\config.ini" -Encoding UTF8 | ForEach-Object {
     if ($_ -match '^([^=]+)=(.+)$') { $ini[$Matches[1].Trim()] = $Matches[2].Trim() }
@@ -41,10 +50,15 @@ function CheckSubmitted {
     } catch { return $false }
 }
 
-# Flush stale updates
+# Flush stale updates — get highest known update_id and skip past it
 try {
-    $res = ((New-Object Net.WebClient).DownloadString("https://api.telegram.org/bot$tok/getUpdates?offset=-1&timeout=0") | ConvertFrom-Json).result
-    $offset = if ($res) { $res[-1].update_id + 1 } else { 0 }
+    $flushUrl = "https://api.telegram.org/bot$tok/getUpdates?timeout=0"
+    $flushRes = ((New-Object Net.WebClient).DownloadString($flushUrl) | ConvertFrom-Json).result
+    $offset = if ($flushRes -and $flushRes.Count -gt 0) { $flushRes[-1].update_id + 1 } else { 0 }
+    if ($offset -gt 0) {
+        # Acknowledge flush so those updates are marked read
+        (New-Object Net.WebClient).DownloadString("https://api.telegram.org/bot$tok/getUpdates?offset=$offset&timeout=0") | Out-Null
+    }
 } catch { $offset = 0 }
 
 # PC info
@@ -127,4 +141,7 @@ while ($true) {
         }
     }
     Start-Sleep 1
+}
+} finally {
+    Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 }
